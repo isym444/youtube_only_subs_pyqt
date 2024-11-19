@@ -357,7 +357,7 @@ class VideoCard(QWidget):
                 background-color: #b71c1c;
             }
         """)
-        remove_button.clicked.connect(self.remove_channel)
+        remove_button.clicked.connect(lambda: asyncio.create_task(self.remove_channel()))
         layout.addWidget(remove_button)
         
         # Set the layout
@@ -421,13 +421,40 @@ class VideoCard(QWidget):
         video_url = f"https://www.youtube.com/watch?v={self.video_data['video_id']}"
         webbrowser.open(video_url)
 
-    def remove_channel(self):
+    async def remove_channel(self):
+        # Create and show update dialog
+        dialog = UpdateDialog(self)
+        dialog.setWindowTitle("Removing Channel")
+        dialog.show()
+        
+        # Force the dialog to be displayed immediately
+        await asyncio.sleep(0.1)
+        
         try:
+            dialog.append_text(f"Removing channel: {self.video_data['channel_name']}\n")
+            await asyncio.sleep(0.1)
+            
+            dialog.append_text("Removing from database...")
+            await asyncio.sleep(0.1)
+            
             # Remove from database
             self.parent.db.remove_channel(self.video_data['channel_id'])
+            dialog.append_text(" Done ✓\n")
+            await asyncio.sleep(0.1)
+            
+            dialog.append_text("\nUpdating dashboard...")
+            await asyncio.sleep(0.1)
+            
             # Reload the channels display
-            asyncio.create_task(self.parent.load_channels())
+            await self.parent.load_channels()
+            dialog.append_text(" Done ✓\n")
+            await asyncio.sleep(0.1)
+            
+            dialog.append_text("\n=== Channel Removed Successfully ===")
+            
         except Exception as e:
+            dialog.append_text(f"\nError removing channel: {str(e)}")
+            await asyncio.sleep(0.1)
             print(f"Error removing channel: {str(e)}")
 
 class MainWindow(QMainWindow):
