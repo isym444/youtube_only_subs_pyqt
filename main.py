@@ -181,18 +181,54 @@ class VideoCard(QWidget):
         self.video_data = video_data
         self.parent = parent
         
-        layout = QVBoxLayout()
+        # Create a frame to handle the background and border
+        self.frame = QFrame(self)
+        self.frame.setObjectName("card")
+        self.frame.setMinimumSize(340, 320)
+        self.frame.setMaximumSize(340, 320)
         
+        # Main layout for the frame
+        main_layout = QVBoxLayout(self)
+        main_layout.addWidget(self.frame)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Layout for the frame's contents
+        layout = QVBoxLayout(self.frame)
+        layout.setSpacing(16)  # Increase overall spacing between elements
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Set the background color based on has_new_video
+        try:
+            has_new_video = int(video_data.get('has_new_video', '0'))
+            if has_new_video:
+                print(f"Card {video_data['channel_name']} has new video, applying highlight")
+                self.frame.setStyleSheet("""
+                    QFrame#card {
+                        background-color: #1a472a;
+                        border: 2px solid #2e8b57;
+                        border-radius: 8px;
+                    }
+                """)
+            else:
+                self.frame.setStyleSheet("""
+                    QFrame#card {
+                        background-color: #3b3b3b;
+                        border-radius: 8px;
+                    }
+                """)
+        except Exception as e:
+            print(f"Error applying highlight: {e}")
+
         # Create thumbnail label
         self.thumbnail = QLabel()
         self.thumbnail.setFixedSize(320, 180)  # 16:9 aspect ratio
-        self.thumbnail.setStyleSheet("""
-            QLabel {
-                background-color: #1f1f1f;
-                border-radius: 4px;
-            }
-        """)
+        self.thumbnail.setStyleSheet("background-color: #1f1f1f; border-radius: 4px;")
         layout.addWidget(self.thumbnail)
+        
+        # Create a spacer widget for extra padding
+        spacer = QWidget()
+        spacer.setFixedHeight(15)  # Add 15 pixels of fixed spacing
+        layout.addWidget(spacer)
         
         # Load thumbnail
         self.load_thumbnail(video_data['video_id'])
@@ -224,16 +260,20 @@ class VideoCard(QWidget):
         upload_date = QLabel(upload_text)
         
         # Style labels
-        channel_name.setStyleSheet("color: white; font-weight: bold; font-size: 14px;")
+        channel_name.setStyleSheet("color: white; font-weight: bold; font-size: 14px; margin-top: 15px;")
         video_title.setStyleSheet("color: white; font-size: 12px;")
         video_views.setStyleSheet("color: white; font-size: 11px;")
         upload_date.setStyleSheet("color: white; font-size: 11px;")
         
-        # Add labels to layout
+        # Add labels to layout with explicit spacing
         layout.addWidget(channel_name)
         layout.addWidget(video_title)
         layout.addWidget(video_views)
         layout.addWidget(upload_date)
+        
+        # Set layout properties
+        layout.setSpacing(8)  # Space between widgets
+        layout.setContentsMargins(10, 10, 10, 10)  # Left, Top, Right, Bottom margins
         
         # Add remove button
         remove_button = QPushButton("Remove Channel")
@@ -252,48 +292,9 @@ class VideoCard(QWidget):
         remove_button.clicked.connect(self.remove_channel)
         layout.addWidget(remove_button)
         
-        # Set layout properties
-        layout.setSpacing(8)
-        layout.setContentsMargins(10, 10, 10, 10)
-        
         # Set the layout
         self.setLayout(layout)
         
-        # Set object name and size
-        self.setObjectName("card")
-        self.setMinimumSize(340, 320)
-        self.setMaximumSize(340, 320)
-        
-        # Apply highlighting based on has_new_video
-        try:
-            print("HELLO WORLD!")
-            print(video_data.get('has_new_video'))
-            has_new_video = int(video_data.get('has_new_video', '0'))
-            if has_new_video:
-                print("ARRIVED")
-                self.setStyleSheet("""
-                    QWidget#card {
-                        background-color: #B3FFB3;
-                        border: 3px solid #4CAF50;
-                        border-radius: 8px;
-                    }
-                    QWidget#card:hover {
-                        background-color: #454545;
-                    }
-                """)
-            else:
-                self.setStyleSheet("""
-                    QWidget#card {
-                        background-color: #3b3b3b;
-                        border-radius: 8px;
-                    }
-                    QWidget#card:hover {
-                        background-color: #454545;
-                    }
-                """)
-        except Exception as e:
-            print(f"Error setting card style: {e}")
-
         # Make the widget accept mouse events
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMouseTracking(True)
@@ -446,16 +447,21 @@ class MainWindow(QMainWindow):
         channels = self.db.get_all_channels()
         
         # Sort channels by upload date
-        from datetime import datetime
-        def get_days_since(channel):
+        def parse_upload_date(channel):
             try:
-                upload_date = datetime.strptime(channel[6], '%Y%m%d')
-                return (datetime.now() - upload_date).days
-            except:
-                return float('inf')  # Put invalid dates at the end
+                upload_date_str = channel[6]  # Assuming upload_date is at index 6
+                # Parse the ISO format date string
+                upload_date = datetime.strptime(upload_date_str[:-6], "%Y-%m-%dT%H:%M:%S")
+                print(upload_date)
+                return upload_date
+            except Exception as e:
+                print(f"Error parsing date for channel {channel[1]}: {e}")
+                return datetime.min  # Return earliest possible date for invalid dates
         
-        channels = sorted(channels, key=get_days_since, reverse=True)
-        
+        channels = sorted(channels, key=parse_upload_date, reverse=True)  # reverse=True for newest first
+        print(channels)
+        for c in channels:
+            print(c[6])
         # Add channels to grid
         row = 0
         col = 0
