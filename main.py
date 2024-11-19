@@ -1,7 +1,7 @@
 import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLineEdit, QPushButton, QGridLayout, 
-                            QLabel, QScrollArea)
+                            QLabel, QScrollArea, QFrame)
 from PyQt6.QtCore import Qt, QTimer
 import asyncio
 import aiotube
@@ -9,46 +9,71 @@ from database import Database
 import qasync
 
 class ChannelInfoWindow(QWidget):
-    def __init__(self, channel_data, parent=None):
+    def __init__(self, search_results, parent=None):
         super().__init__()
-        self.channel_data = channel_data
+        self.search_results = search_results  # Now expects a list of channels
         self.parent = parent
         self.setWindowTitle("Channel Information")
-        self.setGeometry(200, 200, 400, 300)
+        self.setGeometry(200, 200, 400, 600)  # Made taller to accommodate multiple channels
         
         layout = QVBoxLayout()
         
-        # Display channel info using the new data structure
-        channel_name = QLabel(f"Channel: {channel_data['name']}")
-        subscribers = QLabel(f"Subscribers: {channel_data['subscribers']}")
-        description = QLabel(f"Description: {channel_data['description'][:200]}...")
-        description.setWordWrap(True)
-        channel_id = QLabel(f"ID: {channel_data['channel_id']}")
+        # Create a scroll area for multiple channels
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
         
-        # Style the labels
-        for label in [channel_name, subscribers, description, channel_id]:
-            label.setStyleSheet("color: white;")
+        # Add each channel's information
+        for channel_data in search_results:
+            channel_widget = QWidget()
+            channel_layout = QVBoxLayout()
+            
+            # Display channel info
+            channel_name = QLabel(f"Channel: {channel_data['name']}")
+            subscribers = QLabel(f"Subscribers: {channel_data['subscribers']}")
+            description = QLabel(f"Description: {channel_data['description'][:200]}...")
+            description.setWordWrap(True)
+            channel_id = QLabel(f"ID: {channel_data['channel_id']}")
+            
+            # Style the labels
+            for label in [channel_name, subscribers, description, channel_id]:
+                label.setStyleSheet("color: white;")
+            
+            channel_layout.addWidget(channel_name)
+            channel_layout.addWidget(subscribers)
+            channel_layout.addWidget(description)
+            channel_layout.addWidget(channel_id)
+            
+            # Add Channel button for this specific channel
+            add_button = QPushButton("Add Channel")
+            add_button.clicked.connect(lambda checked, cd=channel_data: 
+                asyncio.create_task(self.add_channel(cd)))
+            add_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #4CAF50;
+                    color: white;
+                    padding: 8px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #45a049;
+                }
+            """)
+            channel_layout.addWidget(add_button)
+            
+            # Add a separator line except for the last channel
+            if channel_data != search_results[-1]:
+                separator = QFrame()
+                separator.setFrameShape(QFrame.Shape.HLine)
+                separator.setStyleSheet("background-color: #555;")
+                channel_layout.addWidget(separator)
+            
+            channel_widget.setLayout(channel_layout)
+            scroll_layout.addWidget(channel_widget)
         
-        layout.addWidget(channel_name)
-        layout.addWidget(subscribers)
-        layout.addWidget(description)
-        layout.addWidget(channel_id)
-        
-        # Add Channel button
-        add_button = QPushButton("Add Channel")
-        add_button.clicked.connect(lambda: asyncio.create_task(self.add_channel()))
-        add_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                padding: 8px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        layout.addWidget(add_button)
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
         
         self.setLayout(layout)
         
@@ -59,10 +84,10 @@ class ChannelInfoWindow(QWidget):
             }
         """)
 
-    async def add_channel(self):
+    async def add_channel(self, channel_data):
         try:
             # Get channel data
-            channel = aiotube.Channel(self.channel_data['channel_id'])
+            channel = aiotube.Channel(channel_data['channel_id'])
             metadata = channel.metadata
             
             # Get latest video
@@ -81,7 +106,7 @@ class ChannelInfoWindow(QWidget):
                 # Prepare channel data for database
                 channel_data = {
                     'channel_name': metadata.get('name', 'Unknown Channel'),
-                    'channel_id': self.channel_data['channel_id'],
+                    'channel_id': channel_data['channel_id'],
                     'video_id': latest_video_id,
                     'video_title': video_metadata.get('title', 'Video information unavailable'),
                     'video_views': str(video_metadata.get('views', 'N/A')),
@@ -93,7 +118,6 @@ class ChannelInfoWindow(QWidget):
                 # Save to database and update UI
                 self.parent.db.add_channel(channel_data)
                 await self.parent.load_channels()
-                self.close()
                 
             except Exception as video_error:
                 print(f"Error fetching video data: {video_error}")
@@ -193,25 +217,30 @@ class MainWindow(QMainWindow):
 
         try:
             print(f"Searching for channel: {query}")
-            channels = aiotube.Search.channels(query, 2)
+            channels = aiotube.Search.channels(query, 3)  # Get top 3 channels
             if not channels:
                 print("No channels found")
                 return
 
-            # Get first channel's info
-            channel = aiotube.Channel(channels[0])
-            metadata = channel.metadata  # metadata should be available directly
-            
-            search_result = {
-                'channel_id': channels[0],
-                'name': metadata.get('name', 'Unknown Channel'),
-                'subscribers': str(metadata.get('subscriber_count', 'N/A')),  # Convert to string
-                'description': metadata.get('description', 'No description available')
-            }
+            search_results = []
+            for channel_id in channels:
+                try:
+                    channel = aiotube.Channel(channel_id)
+                    metadata = channel.metadata
+                    
+                    search_result = {
+                        'channel_id': channel_id,
+                        'name': metadata.get('name', 'Unknown Channel'),
+                        'subscribers': str(metadata.get('subscriber_count', 'N/A')),
+                        'description': metadata.get('description', 'No description available')
+                    }
+                    search_results.append(search_result)
+                except Exception as channel_error:
+                    print(f"Error fetching channel {channel_id}: {channel_error}")
 
-            print(f"Found channel: {search_result}")
+            print(f"Found channels: {search_results}")
             
-            self.channel_info_window = ChannelInfoWindow(search_result, self)
+            self.channel_info_window = ChannelInfoWindow(search_results, self)
             self.channel_info_window.show()
             
         except Exception as e:
