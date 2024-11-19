@@ -329,6 +329,18 @@ class VideoCard(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             # Open URL in default browser
             QDesktopServices.openUrl(QUrl(self.video_url))
+            # Update has_new_video status in database
+            try:
+                self.parent.db.mark_video_as_watched(self.video_data['channel_id'])
+                # Update the UI for this specific card
+                self.frame.setStyleSheet("""
+                    QFrame#card {
+                        background-color: #3b3b3b;
+                        border-radius: 8px;
+                    }
+                """)
+            except Exception as e:
+                print(f"Error marking video as watched: {str(e)}")
             event.accept()
         else:
             super().mousePressEvent(event)

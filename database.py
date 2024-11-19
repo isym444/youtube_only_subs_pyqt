@@ -135,4 +135,15 @@ class Database:
                 cursor = conn.cursor()
                 cursor.execute('DELETE FROM channels WHERE channel_id = ?', (channel_id,))
                 conn.commit()
+    
+    def mark_video_as_watched(self, channel_id):
+        try:
+            self.cursor.execute("""
+                UPDATE channels 
+                SET has_new_video = 0 
+                WHERE channel_id = ?
+            """, (channel_id,))
+            self.conn.commit()
+        except Exception as e:
+            print(f"Error marking video as watched: {str(e)}")
   
