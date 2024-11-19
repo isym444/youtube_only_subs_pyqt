@@ -1,7 +1,7 @@
 import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLineEdit, QPushButton, QGridLayout, 
-                            QLabel, QScrollArea, QFrame)
+                            QLabel, QScrollArea, QFrame, QDialog, QTextEdit)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QUrl
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkProxy, QSslConfiguration, QSsl
 from PyQt6.QtGui import QPixmap, QDesktopServices
@@ -13,6 +13,40 @@ import qasync
 import webbrowser
 import requests
 from datetime import datetime
+
+class UpdateDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Updating Channels")
+        self.setGeometry(300, 300, 400, 300)
+        
+        layout = QVBoxLayout()
+        
+        self.text_area = QTextEdit()
+        self.text_area.setReadOnly(True)
+        layout.addWidget(self.text_area)
+        
+        self.setLayout(layout)
+        
+        # Style the dialog
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2b2b2b;
+            }
+            QTextEdit {
+                background-color: #1f1f1f;
+                color: #ffffff;
+                border: none;
+                font-family: monospace;
+            }
+        """)
+    
+    def append_text(self, text):
+        self.text_area.append(text)
+        # Ensure the newest text is visible
+        self.text_area.verticalScrollBar().setValue(
+            self.text_area.verticalScrollBar().maximum()
+        )
 
 class ChannelInfoWindow(QWidget):
     def __init__(self, search_results, parent=None):
@@ -500,13 +534,21 @@ class MainWindow(QMainWindow):
 
     async def update_all_channels(self):
         try:
+            # Create and show the update dialog
+            dialog = UpdateDialog(self)
+            dialog.show()
+            
             channels = self.db.get_all_channels()
             updated_channels = []
             no_updates = []
             
+            dialog.append_text("Starting channel updates...\n")
+            
             for channel in channels:
                 channel_id = channel[2]
                 channel_name = channel[1]
+                
+                dialog.append_text(f"Checking {channel_name}...")
                 
                 # Get channel and latest video data
                 channel_obj = Channel(channel_id)
@@ -530,27 +572,36 @@ class MainWindow(QMainWindow):
                     # Update in database
                     self.db.update_channel(channel_data)
                     updated_channels.append(channel_name)
+                    dialog.append_text(" New video found! ✓\n")
                 else:
                     no_updates.append(channel_name)
+                    dialog.append_text(" No new videos\n")
+                
+                # Allow UI to update
+                await asyncio.sleep(0.1)
             
-            # Print update summary
+            # Print final summary
+            dialog.append_text("\n=== Update Complete ===\n")
+            
             if updated_channels:
-                print("\nChannels updated with new videos:")
+                dialog.append_text("\nChannels with new videos:")
                 for name in updated_channels:
-                    print(f"✓ {name}")
+                    dialog.append_text(f"✓ {name}")
             
             if no_updates:
-                print("\nChannels with no new videos:")
+                dialog.append_text("\nChannels with no new videos:")
                 for name in no_updates:
-                    print(f"- {name}")
+                    dialog.append_text(f"- {name}")
                     
             if not channels:
-                print("\nNo channels in database to update!")
+                dialog.append_text("\nNo channels in database to update!")
             
             # Reload the channel display
             await self.load_channels()
             
         except Exception as e:
+            if dialog:
+                dialog.append_text(f"\nError updating channels: {str(e)}")
             print(f"Error updating channels: {str(e)}")
 
 async def main():
