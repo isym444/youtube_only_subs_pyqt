@@ -12,6 +12,7 @@ from database import Database
 import qasync
 import webbrowser
 import requests
+from datetime import datetime
 
 class ChannelInfoWindow(QWidget):
     def __init__(self, search_results, parent=None):
@@ -155,7 +156,8 @@ class ChannelInfoWindow(QWidget):
                     'video_id': latest_video_id,
                     'video_title': video_metadata.get('title', 'Video information unavailable'),
                     'video_views': str(video_metadata.get('views', 'N/A')),
-                    'upload_date': str(video_metadata.get('upload_date', 'N/A'))
+                    'upload_date': str(video_metadata.get('upload_date', 'N/A')),
+                    'has_new_video': 1
                 }
                 
                 print(f"Saving channel data: {channel_data}")
@@ -177,7 +179,7 @@ class VideoCard(QWidget):
     def __init__(self, video_data, parent=None):
         super().__init__()
         self.video_data = video_data
-        self.parent = parent  # Store parent reference
+        self.parent = parent
         
         layout = QVBoxLayout()
         
@@ -195,11 +197,26 @@ class VideoCard(QWidget):
         # Load thumbnail
         self.load_thumbnail(video_data['video_id'])
         
-        # Create labels for video information
+        # Create and add labels for video information
         channel_name = QLabel(video_data['channel_name'])
         video_title = QLabel(video_data['video_title'])
         video_views = QLabel(f"Views: {video_data['video_views']}")
-        upload_date = QLabel(f"Uploaded: {video_data['upload_date']}")
+        
+        # Calculate days since upload
+        try:
+            upload_date_str = video_data['upload_date']
+            print(upload_date_str)
+            if 'T' in upload_date_str:
+                upload_date = datetime.fromisoformat(upload_date_str.replace('Z', '+00:00'))
+            else:
+                upload_date = datetime.strptime(upload_date_str, '%Y%m%d')
+            days_since = (datetime.now() - upload_date).days
+            upload_text = f"Uploaded {days_since} days ago"
+        except Exception as e:
+            print(f"Error calculating days: {e}")
+            upload_text = "Upload date unknown"
+        
+        upload_date = QLabel(upload_text)
         
         # Style labels
         channel_name.setStyleSheet("color: white; font-weight: bold; font-size: 14px;")
@@ -207,37 +224,13 @@ class VideoCard(QWidget):
         video_views.setStyleSheet("color: white; font-size: 11px;")
         upload_date.setStyleSheet("color: white; font-size: 11px;")
         
-        for label in [channel_name, video_title, video_views, upload_date]:
-            label.setWordWrap(True)
-        
-        # Add widgets to layout
+        # Add labels to layout
         layout.addWidget(channel_name)
         layout.addWidget(video_title)
         layout.addWidget(video_views)
         layout.addWidget(upload_date)
         
-        layout.setSpacing(5)
-        layout.setContentsMargins(10, 10, 10, 10)
-        
-        # Update the stylesheet to use proper Qt properties
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #3b3b3b;
-                border-radius: 8px;
-            }
-            QWidget:hover {
-                background-color: #454545;
-            }
-        """)
-        
-        # Set cursor shape directly instead of using CSS
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        # Adjust card size to accommodate thumbnail
-        self.setMinimumSize(340, 320)
-        self.setMaximumSize(340, 320)
-        
-        # Add remove button at the bottom
+        # Add remove button
         remove_button = QPushButton("Remove Channel")
         remove_button.setStyleSheet("""
             QPushButton {
@@ -254,10 +247,45 @@ class VideoCard(QWidget):
         remove_button.clicked.connect(self.remove_channel)
         layout.addWidget(remove_button)
         
-        self.setLayout(layout)
-        self.clicked.connect(self.open_video)
-        self.setMouseTracking(True)
+        # Set layout properties
+        layout.setSpacing(8)
+        layout.setContentsMargins(10, 10, 10, 10)
         
+        # Set the layout
+        self.setLayout(layout)
+        
+        # Set object name and size
+        self.setObjectName("card")
+        self.setMinimumSize(340, 320)
+        self.setMaximumSize(340, 320)
+        
+        # Apply highlighting based on has_new_video
+        try:
+            has_new_video = int(video_data.get('has_new_video', '0'))
+            if has_new_video:
+                self.setStyleSheet("""
+                    QWidget#card {
+                        background-color: #3b3b3b;
+                        border: 3px solid #4CAF50;
+                        border-radius: 8px;
+                    }
+                    QWidget#card:hover {
+                        background-color: #454545;
+                    }
+                """)
+            else:
+                self.setStyleSheet("""
+                    QWidget#card {
+                        background-color: #3b3b3b;
+                        border-radius: 8px;
+                    }
+                    QWidget#card:hover {
+                        background-color: #454545;
+                    }
+                """)
+        except Exception as e:
+            print(f"Error setting card style: {e}")
+
     def load_thumbnail(self, video_id):
         try:
             # Use requests to download the thumbnail
@@ -343,6 +371,15 @@ class MainWindow(QMainWindow):
         # Load existing channels
         # asyncio.create_task(self.load_channels())
 
+    def closeEvent(self, event):
+        """Handle the window close event"""
+        try:
+            # Close the database connection
+            self.db.conn.close()
+        except:
+            pass
+        event.accept()
+
     async def search_channel(self):
         query = self.search_input.text()
         if not query:
@@ -388,7 +425,17 @@ class MainWindow(QMainWindow):
         
         # Get channels from database
         channels = self.db.get_all_channels()
-        print(f"Loaded channels from database: {channels}")
+        
+        # Sort channels by upload date
+        from datetime import datetime
+        def get_days_since(channel):
+            try:
+                upload_date = datetime.strptime(channel[6], '%Y%m%d')
+                return (datetime.now() - upload_date).days
+            except:
+                return float('inf')  # Put invalid dates at the end
+        
+        channels = sorted(channels, key=get_days_since, reverse=True)
         
         # Add channels to grid
         row = 0
@@ -407,6 +454,7 @@ class MainWindow(QMainWindow):
                 'video_title': channel[4],
                 'video_views': channel[5],
                 'upload_date': channel[6],
+                'has_new_video': int(channel[8]) if channel[8] is not None else 0  # Changed index from 7 to 8
             }
             
             video_card = VideoCard(video_data, self)
@@ -429,7 +477,7 @@ class MainWindow(QMainWindow):
                 
                 # Get channel and latest video data
                 channel_obj = Channel(channel_id)
-                latest_video_id = channel_obj.last_uploaded()
+                latest_video_id = channel_obj.last_uploaded
                 
                 if latest_video_id and latest_video_id != channel[3]:
                     # Get new video details
@@ -481,6 +529,13 @@ async def main():
     await window.load_channels()
     window.show()
 
+    def quit_app():
+        loop.stop()
+        app.quit()
+
+    # Connect the quit signal
+    app.lastWindowClosed.connect(quit_app)
+    
     # Create periodic update task
     async def periodic_update():
         while True:
@@ -489,16 +544,18 @@ async def main():
                 await window.update_all_channels()
             except Exception as e:
                 pass
-                # print(f"Error in periodic update: {e}")
 
     # Start periodic update
-    asyncio.create_task(periodic_update())
+    update_task = asyncio.create_task(periodic_update())
     
-    # Run the event loop
     try:
         await loop.run_forever()
     finally:
-        loop.close()
+        update_task.cancel()
+        try:
+            await update_task
+        except asyncio.CancelledError:
+            pass
 
 if __name__ == "__main__":
     try:

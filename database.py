@@ -1,76 +1,138 @@
 import sqlite3
-from datetime import datetime
+import threading
+import os
+import time
+from contextlib import contextmanager
 
 class Database:
+    _lock = threading.Lock()
+    
     def __init__(self):
-        self.conn = sqlite3.connect('youtube_channels.db')
-        self.cursor = self.conn.cursor()
-        self.create_tables()
-
-    def create_tables(self):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS channels (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel_name TEXT,
-                channel_id TEXT,
-                video_id TEXT,
-                video_title TEXT,
-                video_views TEXT,
-                upload_date TEXT,
-                created_at TIMESTAMP,
-                has_new_video BOOLEAN DEFAULT 0
-            )
-        ''')
-        self.conn.commit()
-
-    def add_channel(self, channel_data):
-        cursor = self.conn.cursor()
+        # Get user's home directory
+        user_data_dir = os.path.expanduser('~/Library/Application Support/YouTube Channel Tracker')
+        
+        # Create directory if it doesn't exist
+        os.makedirs(user_data_dir, exist_ok=True)
+        
+        # Create database path
+        self.db_path = os.path.join(user_data_dir, 'youtube_channels.db')
+        
+        # Initialize the database
+        self._initialize_db()
+    
+    @contextmanager
+    def get_connection(self):
+        conn = None
         try:
+            conn = sqlite3.connect(self.db_path, timeout=5.0)
+            yield conn
+        finally:
+            if conn:
+                conn.close()
+    
+    def _initialize_db(self):
+        """Create the channels table if it doesn't exist."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO channels (
-                    channel_name, channel_id, video_id, video_title,
-                    video_views, upload_date, created_at, has_new_video
-                ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)
-            ''', (
-                str(channel_data['channel_name']),
-                str(channel_data['channel_id']),
-                str(channel_data['video_id']),
-                str(channel_data['video_title']),
-                str(channel_data['video_views']),
-                str(channel_data['upload_date']),
-                False
-            ))
-            self.conn.commit()
-            print("Successfully added channel to database")
-        except Exception as e:
-            print(f"Database error: {e}")
-            self.conn.rollback()
-
+                CREATE TABLE IF NOT EXISTS channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel_name TEXT NOT NULL,
+                    channel_id TEXT NOT NULL UNIQUE,
+                    video_id TEXT,
+                    video_title TEXT,
+                    video_views TEXT,
+                    upload_date TEXT,
+                    has_new_video INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            conn.commit()
+    
+    def add_channel(self, channel_data):
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                with self._lock:
+                    with self.get_connection() as conn:
+                        cursor = conn.cursor()
+                        
+                        # Check if channel already exists
+                        cursor.execute('SELECT channel_id FROM channels WHERE channel_id = ?', 
+                                     (channel_data['channel_id'],))
+                        
+                        if cursor.fetchone() is None:
+                            sql = '''INSERT INTO channels 
+                                    (channel_name, channel_id, video_id, video_title, 
+                                     video_views, upload_date, has_new_video) 
+                                    VALUES (?, ?, ?, ?, ?, ?, ?)'''
+                            
+                            cursor.execute(sql, (
+                                channel_data['channel_name'],
+                                channel_data['channel_id'],
+                                channel_data['video_id'],
+                                channel_data['video_title'],
+                                channel_data['video_views'],
+                                channel_data['upload_date'],
+                                channel_data.get('has_new_video', 1)
+                            ))
+                            conn.commit()
+                            print(f"Successfully added channel: {channel_data['channel_name']}")
+                            return True
+                        else:
+                            print(f"Channel already exists: {channel_data['channel_name']}")
+                            return False
+                            
+            except sqlite3.OperationalError as e:
+                if 'database is locked' in str(e):
+                    retry_count += 1
+                    print(f"Database locked, retrying... ({retry_count}/{max_retries})")
+                    time.sleep(0.5)  # Reduced wait time
+                else:
+                    print(f"Database error: {e}")
+                    return False
+            except Exception as e:
+                print(f"Error adding channel: {e}")
+                return False
+        
+        print("Failed to add channel after maximum retries")
+        return False
+    
     def get_all_channels(self):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM channels ORDER BY created_at DESC')
-        return cursor.fetchall()
-
-    def update_channel_video(self, channel_id, video_data):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            UPDATE channels 
-            SET video_id = ?, video_title = ?, video_views = ?,
-                upload_date = ?, has_new_video = ?
-            WHERE channel_id = ?
-        ''', (
-            video_data['video_id'],
-            video_data['video_title'],
-            video_data['video_views'],
-            video_data['upload_date'],
-            True,
-            channel_id
-        ))
-        self.conn.commit()
-
+        with self._lock:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM channels')
+                return cursor.fetchall()
+    
+    def update_channel(self, channel_data):
+        with self._lock:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                sql = '''UPDATE channels 
+                        SET video_id = ?, 
+                            video_title = ?, 
+                            video_views = ?, 
+                            upload_date = ?,
+                            has_new_video = ?
+                        WHERE channel_id = ?'''
+                
+                cursor.execute(sql, (
+                    channel_data['video_id'],
+                    channel_data['video_title'],
+                    channel_data['video_views'],
+                    channel_data['upload_date'],
+                    channel_data.get('has_new_video', 1),
+                    channel_data['channel_id']
+                ))
+                conn.commit()
+    
     def remove_channel(self, channel_id):
-        query = "DELETE FROM channels WHERE channel_id = ?"
-        self.cursor.execute(query, (channel_id,))
-        self.conn.commit()
+        with self._lock:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM channels WHERE channel_id = ?', (channel_id,))
+                conn.commit()
   

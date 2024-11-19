@@ -1,2 +1,4 @@
 *.db
 youtube_channels.db
+dist
+build
