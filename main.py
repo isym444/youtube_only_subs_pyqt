@@ -184,8 +184,8 @@ class VideoCard(QWidget):
         # Create a frame to handle the background and border
         self.frame = QFrame(self)
         self.frame.setObjectName("card")
-        self.frame.setMinimumSize(340, 320)
-        self.frame.setMaximumSize(340, 320)
+        self.frame.setMinimumSize(340, 360)
+        self.frame.setMaximumSize(340, 360)
         
         # Main layout for the frame
         main_layout = QVBoxLayout(self)
@@ -219,24 +219,30 @@ class VideoCard(QWidget):
         except Exception as e:
             print(f"Error applying highlight: {e}")
 
-        # Create thumbnail label
+        # Create thumbnail label without padding
         self.thumbnail = QLabel()
         self.thumbnail.setFixedSize(320, 180)  # 16:9 aspect ratio
         self.thumbnail.setStyleSheet("background-color: #1f1f1f; border-radius: 4px;")
         layout.addWidget(self.thumbnail)
-        
-        # Create a spacer widget for extra padding
-        spacer = QWidget()
-        spacer.setFixedHeight(15)  # Add 15 pixels of fixed spacing
-        layout.addWidget(spacer)
+
+        # Create and add labels for video information
+        channel_name = QLabel(video_data['channel_name'])
+        channel_name.setStyleSheet("color: white; font-weight: bold; font-size: 14px;")
+        channel_name.setWordWrap(True)
+        layout.addWidget(channel_name)
         
         # Load thumbnail
         self.load_thumbnail(video_data['video_id'])
         
-        # Create and add labels for video information
-        channel_name = QLabel(video_data['channel_name'])
         video_title = QLabel(video_data['video_title'])
+        video_title.setStyleSheet("color: white; font-size: 12px;")
+        video_title.setWordWrap(True)
+        layout.addWidget(video_title)
+        
         video_views = QLabel(f"Views: {video_data['video_views']}")
+        video_views.setStyleSheet("color: white; font-size: 11px;")
+        video_views.setWordWrap(True)
+        layout.addWidget(video_views)
         
         # Calculate days since upload
         try:
@@ -258,17 +264,7 @@ class VideoCard(QWidget):
             upload_text = "Upload date unknown"
         
         upload_date = QLabel(upload_text)
-        
-        # Style labels
-        channel_name.setStyleSheet("color: white; font-weight: bold; font-size: 14px; margin-top: 15px;")
-        video_title.setStyleSheet("color: white; font-size: 12px;")
-        video_views.setStyleSheet("color: white; font-size: 11px;")
         upload_date.setStyleSheet("color: white; font-size: 11px;")
-        
-        # Add labels to layout with explicit spacing
-        layout.addWidget(channel_name)
-        layout.addWidget(video_title)
-        layout.addWidget(video_views)
         layout.addWidget(upload_date)
         
         # Set layout properties
