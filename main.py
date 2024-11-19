@@ -165,23 +165,48 @@ class ChannelInfoWindow(QWidget):
         """)
 
     async def add_channel(self, channel_data):
+        # Create and show update dialog BEFORE any try blocks
+        dialog = UpdateDialog(self)
+        dialog.setWindowTitle("Adding Channel")
+        dialog.show()
+        
+        # Force the dialog to be displayed immediately
+        await asyncio.sleep(0.1)  # Give the UI a chance to update
+        
         try:
+            dialog.append_text(f"Adding channel: {channel_data['name']}\n")
+            await asyncio.sleep(0.1)  # Add small delay for UI update
+            
             # Get channel data
+            dialog.append_text("Fetching channel metadata...")
+            await asyncio.sleep(0.1)  # Add small delay for UI update
+            
             channel = Channel(channel_data['channel_id'])
             metadata = channel.metadata
+            dialog.append_text(" Done ✓\n")
+            await asyncio.sleep(0.1)  # Add small delay for UI update
             
             # Get latest video
+            dialog.append_text("Fetching latest video ID...")
+            await asyncio.sleep(0.1)  # Add small delay for UI update
+            
             latest_video_id = channel.last_uploaded
             if not latest_video_id:
-                print("Could not fetch latest video ID")
+                dialog.append_text(" Failed! Could not fetch latest video ID\n")
+                await asyncio.sleep(0.1)  # Add small delay for UI update
                 return
-
-            print(f"Latest video ID: {latest_video_id}")
+            dialog.append_text(f" Done ✓ ({latest_video_id})\n")
+            await asyncio.sleep(0.1)  # Add small delay for UI update
             
             try:
                 # Get video details
+                dialog.append_text("Fetching video details...")
+                await asyncio.sleep(0.1)  # Add small delay for UI update
+                
                 video = Video(latest_video_id)
                 video_metadata = video.metadata
+                dialog.append_text(" Done ✓\n")
+                await asyncio.sleep(0.1)  # Add small delay for UI update
                 
                 # Prepare channel data for database
                 channel_data = {
@@ -194,16 +219,29 @@ class ChannelInfoWindow(QWidget):
                     'has_new_video': 1
                 }
                 
-                print(f"Saving channel data: {channel_data}")
+                dialog.append_text("\nSaving channel data to database...")
+                await asyncio.sleep(0.1)  # Add small delay for UI update
                 
-                # Save to database and update UI
                 self.parent.db.add_channel(channel_data)
+                dialog.append_text(" Done ✓\n")
+                await asyncio.sleep(0.1)  # Add small delay for UI update
+                
+                dialog.append_text("\nUpdating dashboard...")
+                await asyncio.sleep(0.1)  # Add small delay for UI update
+                
                 await self.parent.load_channels()
+                dialog.append_text(" Done ✓\n")
+                await asyncio.sleep(0.1)  # Add small delay for UI update
+                
+                dialog.append_text("\n=== Channel Added Successfully ===")
                 
             except Exception as video_error:
-                print(f"Error fetching video data: {video_error}")
+                dialog.append_text(f"\nError fetching video data: {video_error}")
+                await asyncio.sleep(0.1)  # Add small delay for UI update
         
         except Exception as e:
+            dialog.append_text(f"\nError adding channel: {str(e)}")
+            await asyncio.sleep(0.1)  # Add small delay for UI update
             print(f"Error in add_channel: {str(e)}")
 
 class VideoCard(QWidget):
