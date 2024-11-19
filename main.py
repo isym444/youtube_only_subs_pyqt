@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                             QLabel, QScrollArea, QFrame)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QUrl
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkProxy, QSslConfiguration, QSsl
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QDesktopServices
 import asyncio
 # import aiotube  # Remove or comment out this line
 from aiotube import Channel, Search, Video  # Add this line instead
@@ -206,12 +206,17 @@ class VideoCard(QWidget):
         try:
             upload_date_str = video_data['upload_date']
             print(upload_date_str)
-            if 'T' in upload_date_str:
-                upload_date = datetime.fromisoformat(upload_date_str.replace('Z', '+00:00'))
-            else:
-                upload_date = datetime.strptime(upload_date_str, '%Y%m%d')
-            days_since = (datetime.now() - upload_date).days
-            upload_text = f"Uploaded {days_since} days ago"
+
+            # Convert the string to a datetime object, considering the timezone offset
+            given_time = datetime.strptime(upload_date_str[:-6], "%Y-%m-%dT%H:%M:%S")
+            # Calculate the current time
+            current_time = datetime.now()
+
+            # Calculate the difference in days
+            time_difference = current_time - given_time
+            days_difference = time_difference.days
+
+            upload_text = f"Uploaded {days_difference} days ago"
         except Exception as e:
             print(f"Error calculating days: {e}")
             upload_text = "Upload date unknown"
@@ -261,11 +266,14 @@ class VideoCard(QWidget):
         
         # Apply highlighting based on has_new_video
         try:
+            print("HELLO WORLD!")
+            print(video_data.get('has_new_video'))
             has_new_video = int(video_data.get('has_new_video', '0'))
             if has_new_video:
+                print("ARRIVED")
                 self.setStyleSheet("""
                     QWidget#card {
-                        background-color: #3b3b3b;
+                        background-color: #B3FFB3;
                         border: 3px solid #4CAF50;
                         border-radius: 8px;
                     }
@@ -285,6 +293,13 @@ class VideoCard(QWidget):
                 """)
         except Exception as e:
             print(f"Error setting card style: {e}")
+
+        # Make the widget accept mouse events
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMouseTracking(True)
+        
+        # Store the video URL
+        self.video_url = f"https://www.youtube.com/watch?v={video_data['video_id']}"
 
     def load_thumbnail(self, video_id):
         try:
@@ -315,8 +330,12 @@ class VideoCard(QWidget):
         
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-            
+            # Open URL in default browser
+            QDesktopServices.openUrl(QUrl(self.video_url))
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
     def open_video(self):
         video_url = f"https://www.youtube.com/watch?v={self.video_data['video_id']}"
         webbrowser.open(video_url)
