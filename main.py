@@ -2,11 +2,12 @@ import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLineEdit, QPushButton, QGridLayout, 
                             QLabel, QScrollArea, QFrame)
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 import asyncio
 import aiotube
 from database import Database
 import qasync
+import webbrowser
 
 class ChannelInfoWindow(QWidget):
     def __init__(self, search_results, parent=None):
@@ -126,8 +127,11 @@ class ChannelInfoWindow(QWidget):
             print(f"Error in add_channel: {str(e)}")
 
 class VideoCard(QWidget):
+    clicked = pyqtSignal()  # Add signal for click events
+    
     def __init__(self, video_data, parent=None):
         super().__init__()
+        self.video_data = video_data  # Store video data
         layout = QVBoxLayout()
         
         # Create labels for video information
@@ -161,6 +165,10 @@ class VideoCard(QWidget):
                 background-color: #3b3b3b;
                 border-radius: 8px;
             }
+            QWidget:hover {
+                background-color: #454545;
+                cursor: pointer;
+            }
         """)
         
         # Set a fixed size for the card
@@ -168,6 +176,20 @@ class VideoCard(QWidget):
         self.setMaximumSize(400, 200)
         
         self.setLayout(layout)
+        
+        # Connect click signal to open_video method
+        self.clicked.connect(self.open_video)
+        
+        # Enable mouse tracking for hover effects
+        self.setMouseTracking(True)
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            
+    def open_video(self):
+        video_url = f"https://www.youtube.com/watch?v={self.video_data['video_id']}"
+        webbrowser.open(video_url)
 
 class MainWindow(QMainWindow):
     def __init__(self):
