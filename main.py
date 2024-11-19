@@ -2,12 +2,16 @@ import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLineEdit, QPushButton, QGridLayout, 
                             QLabel, QScrollArea, QFrame)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QUrl
+from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkProxy, QSslConfiguration, QSsl
+from PyQt6.QtGui import QPixmap
 import asyncio
-import aiotube
+# import aiotube  # Remove or comment out this line
+from aiotube import Channel, Search, Video  # Add this line instead
 from database import Database
 import qasync
 import webbrowser
+import requests
 
 class ChannelInfoWindow(QWidget):
     def __init__(self, search_results, parent=None):
@@ -30,9 +34,49 @@ class ChannelInfoWindow(QWidget):
             channel_widget = QWidget()
             channel_layout = QVBoxLayout()
             
-            # Display channel info
+            # Create horizontal layout for avatar and basic info
+            header_layout = QHBoxLayout()
+            
+            # Create and setup avatar label
+            avatar_label = QLabel()
+            avatar_label.setFixedSize(50, 50)
+            if 'avatar' in channel_data and channel_data['avatar']:
+                try:
+                    # Add https: scheme if URL starts with //
+                    avatar_url = channel_data['avatar']
+                    if avatar_url.startswith('//'):
+                        avatar_url = 'https:' + avatar_url
+                    
+                    # Download and set avatar image
+                    response = requests.get(avatar_url)
+                    pixmap = QPixmap()
+                    if pixmap.loadFromData(response.content):
+                        scaled_pixmap = pixmap.scaled(
+                            50, 50,
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation
+                        )
+                        avatar_label.setPixmap(scaled_pixmap)
+                except Exception as e:
+                    print(f"Error loading avatar: {e}")
+            
+            # Create vertical layout for name and subscribers
+            info_layout = QVBoxLayout()
             channel_name = QLabel(f"Channel: {channel_data['name']}")
             subscribers = QLabel(f"Subscribers: {channel_data['subscribers']}")
+            
+            info_layout.addWidget(channel_name)
+            info_layout.addWidget(subscribers)
+            
+            # Add avatar and info to header layout
+            header_layout.addWidget(avatar_label)
+            header_layout.addLayout(info_layout)
+            header_layout.addStretch()
+            
+            # Add header layout to main channel layout
+            channel_layout.addLayout(header_layout)
+            
+            # Display channel info
             description = QLabel(f"Description: {channel_data['description'][:200]}...")
             description.setWordWrap(True)
             channel_id = QLabel(f"ID: {channel_data['channel_id']}")
@@ -88,11 +132,11 @@ class ChannelInfoWindow(QWidget):
     async def add_channel(self, channel_data):
         try:
             # Get channel data
-            channel = aiotube.Channel(channel_data['channel_id'])
+            channel = Channel(channel_data['channel_id'])
             metadata = channel.metadata
             
             # Get latest video
-            latest_video_id = channel.last_uploaded()
+            latest_video_id = channel.last_uploaded
             if not latest_video_id:
                 print("Could not fetch latest video ID")
                 return
@@ -101,7 +145,7 @@ class ChannelInfoWindow(QWidget):
             
             try:
                 # Get video details
-                video = aiotube.Video(latest_video_id)
+                video = Video(latest_video_id)
                 video_metadata = video.metadata
                 
                 # Prepare channel data for database
@@ -127,12 +171,29 @@ class ChannelInfoWindow(QWidget):
             print(f"Error in add_channel: {str(e)}")
 
 class VideoCard(QWidget):
-    clicked = pyqtSignal()  # Add signal for click events
+    clicked = pyqtSignal()
+    removed = pyqtSignal(str)  # New signal for removal
     
     def __init__(self, video_data, parent=None):
         super().__init__()
-        self.video_data = video_data  # Store video data
+        self.video_data = video_data
+        self.parent = parent  # Store parent reference
+        
         layout = QVBoxLayout()
+        
+        # Create thumbnail label
+        self.thumbnail = QLabel()
+        self.thumbnail.setFixedSize(320, 180)  # 16:9 aspect ratio
+        self.thumbnail.setStyleSheet("""
+            QLabel {
+                background-color: #1f1f1f;
+                border-radius: 4px;
+            }
+        """)
+        layout.addWidget(self.thumbnail)
+        
+        # Load thumbnail
+        self.load_thumbnail(video_data['video_id'])
         
         # Create labels for video information
         channel_name = QLabel(video_data['channel_name'])
@@ -149,17 +210,16 @@ class VideoCard(QWidget):
         for label in [channel_name, video_title, video_views, upload_date]:
             label.setWordWrap(True)
         
-        # Add widgets to layout with some spacing
+        # Add widgets to layout
         layout.addWidget(channel_name)
         layout.addWidget(video_title)
         layout.addWidget(video_views)
         layout.addWidget(upload_date)
         
-        # Remove spacing between widgets
         layout.setSpacing(5)
         layout.setContentsMargins(10, 10, 10, 10)
         
-        # Style the card
+        # Update the stylesheet to use proper Qt properties
         self.setStyleSheet("""
             QWidget {
                 background-color: #3b3b3b;
@@ -167,21 +227,63 @@ class VideoCard(QWidget):
             }
             QWidget:hover {
                 background-color: #454545;
-                cursor: pointer;
             }
         """)
         
-        # Set a fixed size for the card
-        self.setMinimumSize(300, 150)
-        self.setMaximumSize(400, 200)
+        # Set cursor shape directly instead of using CSS
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        # Adjust card size to accommodate thumbnail
+        self.setMinimumSize(340, 320)
+        self.setMaximumSize(340, 320)
+        
+        # Add remove button at the bottom
+        remove_button = QPushButton("Remove Channel")
+        remove_button.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f;
+                color: white;
+                padding: 5px;
+                border-radius: 4px;
+                margin-top: 5px;
+            }
+            QPushButton:hover {
+                background-color: #b71c1c;
+            }
+        """)
+        remove_button.clicked.connect(self.remove_channel)
+        layout.addWidget(remove_button)
         
         self.setLayout(layout)
-        
-        # Connect click signal to open_video method
         self.clicked.connect(self.open_video)
-        
-        # Enable mouse tracking for hover effects
         self.setMouseTracking(True)
+        
+    def load_thumbnail(self, video_id):
+        try:
+            # Use requests to download the thumbnail
+            url = f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8"
+            }
+            response = requests.get(url, headers=headers, verify=True)
+            response.raise_for_status()  # Raise an exception for bad status codes
+            
+            # Create QPixmap from the downloaded data
+            pixmap = QPixmap()
+            if pixmap.loadFromData(response.content):
+                scaled_pixmap = pixmap.scaled(
+                    self.thumbnail.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.thumbnail.setPixmap(scaled_pixmap)
+                print(f"Successfully loaded thumbnail for video {video_id}")
+            else:
+                print(f"Failed to create pixmap from thumbnail data for video {video_id}")
+                
+        except Exception as e:
+            print(f"Error loading thumbnail for video {video_id}: {str(e)}")
         
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -190,6 +292,15 @@ class VideoCard(QWidget):
     def open_video(self):
         video_url = f"https://www.youtube.com/watch?v={self.video_data['video_id']}"
         webbrowser.open(video_url)
+
+    def remove_channel(self):
+        try:
+            # Remove from database
+            self.parent.db.remove_channel(self.video_data['channel_id'])
+            # Reload the channels display
+            asyncio.create_task(self.parent.load_channels())
+        except Exception as e:
+            print(f"Error removing channel: {str(e)}")
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -239,7 +350,7 @@ class MainWindow(QMainWindow):
 
         try:
             print(f"Searching for channel: {query}")
-            channels = aiotube.Search.channels(query, 3)  # Get top 3 channels
+            channels = Search.channels(query, 3)  # Get top 3 channels
             if not channels:
                 print("No channels found")
                 return
@@ -247,14 +358,16 @@ class MainWindow(QMainWindow):
             search_results = []
             for channel_id in channels:
                 try:
-                    channel = aiotube.Channel(channel_id)
+                    channel = Channel(channel_id)
                     metadata = channel.metadata
+                    print(metadata)
                     
                     search_result = {
                         'channel_id': channel_id,
                         'name': metadata.get('name', 'Unknown Channel'),
-                        'subscribers': str(metadata.get('subscriber_count', 'N/A')),
-                        'description': metadata.get('description', 'No description available')
+                        'subscribers': str(metadata.get('subscribers', 'N/A')),
+                        'description': metadata.get('description', 'No description available'),
+                        'avatar': metadata.get('avatar', '')
                     }
                     search_results.append(search_result)
                 except Exception as channel_error:
@@ -282,9 +395,9 @@ class MainWindow(QMainWindow):
         col = 0
         max_cols = 3
         
-        # Set spacing between cards
-        self.grid_layout.setSpacing(20)
-        self.grid_layout.setContentsMargins(20, 20, 20, 20)
+        # Set larger spacing between cards
+        self.grid_layout.setSpacing(30)
+        self.grid_layout.setContentsMargins(30, 30, 30, 30)
         
         for channel in channels:
             video_data = {
@@ -304,6 +417,61 @@ class MainWindow(QMainWindow):
                 col = 0
                 row += 1
 
+    async def update_all_channels(self):
+        try:
+            channels = self.db.get_all_channels()
+            updated_channels = []
+            no_updates = []
+            
+            for channel in channels:
+                channel_id = channel[2]
+                channel_name = channel[1]
+                
+                # Get channel and latest video data
+                channel_obj = Channel(channel_id)
+                latest_video_id = channel_obj.last_uploaded()
+                
+                if latest_video_id and latest_video_id != channel[3]:
+                    # Get new video details
+                    video = Video(latest_video_id)
+                    video_metadata = video.metadata
+                    
+                    # Update channel data
+                    channel_data = {
+                        'channel_name': channel_name,
+                        'channel_id': channel_id,
+                        'video_id': latest_video_id,
+                        'video_title': video_metadata.get('title', 'Video information unavailable'),
+                        'video_views': str(video_metadata.get('views', 'N/A')),
+                        'upload_date': str(video_metadata.get('upload_date', 'N/A'))
+                    }
+                    
+                    # Update in database
+                    self.db.update_channel(channel_data)
+                    updated_channels.append(channel_name)
+                else:
+                    no_updates.append(channel_name)
+            
+            # Print update summary
+            if updated_channels:
+                print("\nChannels updated with new videos:")
+                for name in updated_channels:
+                    print(f"✓ {name}")
+            
+            if no_updates:
+                print("\nChannels with no new videos:")
+                for name in no_updates:
+                    print(f"- {name}")
+                    
+            if not channels:
+                print("\nNo channels in database to update!")
+            
+            # Reload the channel display
+            await self.load_channels()
+            
+        except Exception as e:
+            print(f"Error updating channels: {str(e)}")
+
 async def main():
     app = QApplication(sys.argv)
     loop = qasync.QEventLoop(app)
@@ -316,15 +484,21 @@ async def main():
     # Create periodic update task
     async def periodic_update():
         while True:
-            await asyncio.sleep(3600)  # Check for updates every hour
-            await window.update_all_channels()
+            try:
+                await asyncio.sleep(3600)  # Check for updates every hour
+                await window.update_all_channels()
+            except Exception as e:
+                pass
+                # print(f"Error in periodic update: {e}")
 
     # Start periodic update
     asyncio.create_task(periodic_update())
     
     # Run the event loop
-    with loop:
+    try:
         await loop.run_forever()
+    finally:
+        loop.close()
 
 if __name__ == "__main__":
     try:

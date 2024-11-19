@@ -4,6 +4,7 @@ from datetime import datetime
 class Database:
     def __init__(self):
         self.conn = sqlite3.connect('youtube_channels.db')
+        self.cursor = self.conn.cursor()
         self.create_tables()
 
     def create_tables(self):
@@ -66,4 +67,10 @@ class Database:
             True,
             channel_id
         ))
-        self.conn.commit() 
+        self.conn.commit()
+
+    def remove_channel(self, channel_id):
+        query = "DELETE FROM channels WHERE channel_id = ?"
+        self.cursor.execute(query, (channel_id,))
+        self.conn.commit()
+  
