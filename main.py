@@ -48,6 +48,37 @@ class UpdateDialog(QDialog):
             self.text_area.verticalScrollBar().maximum()
         )
 
+class LoadingDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Loading Dashboard")
+        self.setFixedSize(300, 100)
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint)  # Remove window decorations
+        
+        layout = QVBoxLayout()
+        
+        # Loading message
+        self.message = QLabel("Loading YouTube Channel Dashboard... Please wait up to 10 seconds!")
+        self.message.setWordWrap(True)  # Enable text wrapping
+        self.message.setStyleSheet("""
+            color: white;
+            font-size: 14px;
+            margin-bottom: 10px;
+        """)
+        self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.message)
+        
+        self.setLayout(layout)
+        
+        # Style the dialog
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2b2b2b;
+                border: 2px solid #1f1f1f;
+                border-radius: 10px;
+            }
+        """)
+
 class ChannelInfoWindow(QWidget):
     def __init__(self, search_results, parent=None):
         super().__init__()
@@ -495,7 +526,7 @@ class MainWindow(QMainWindow):
         # Initialize database
         self.db = Database()
         
-        # Load existing channels
+        # Don't load channels here anymore
         # asyncio.create_task(self.load_channels())
 
     def closeEvent(self, event):
@@ -674,8 +705,20 @@ async def main():
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
     
+    # Create loading dialog
+    loading = LoadingDialog()
+    loading.show()
+    
+    # Force the application to process events and show the dialog
+    app.processEvents()
+    await asyncio.sleep(0.1)  # Give the UI a chance to update
+    
+    # Create main window but don't show it yet
     window = MainWindow()
-    await window.load_channels()
+    await window.load_channels()  # Load the channels
+    
+    # Hide loading dialog and show main window
+    loading.close()
     window.show()
 
     def quit_app():
